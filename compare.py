@@ -1,46 +1,48 @@
-"""
-- Импорты
-- Объявление функций
-- Объявление переменных глобально
-- Декораторы
-
-Хочу чтобы модель давала скор = 1, если я даю на вход один и тот же файл. А на дубли файлов давала скор > 0.9
-На разные файлы (не дубли) давала скор < 0.3
-
-Можно отдельно считать "Прямой плагиат" или "Косвенный"
-"""
-
-# with open('files/main.py', 'r') as fd:
-#     text = fd.read()
-#
-#     # body_parse = ast.parse(text).body
-#     # astpretty.pprint(body_parse[1])
-#
-#     for node in ast.iter_child_nodes(ast.parse(text)):
-#         if isinstance(node, ast.Import):
-#             print(node.names[0])
-
-import ast
-from collections import namedtuple
+import argparse
+import pickle
+import re
+from Levenshtein import distance
 
 
-def get_imports(path):
-    Import = namedtuple("Import", ["module", "name", "alias"])
-    with open(path, 'r', encoding="UTF-8") as fh:
-        root = ast.parse(fh.read(), path)
+def lev_dist(f1_path: str, f2_path: str):
+    with open(f1_path, 'r', encoding="UTF-8") as f1, open(f2_path, 'r', encoding="UTF-8") as f2:
+        return distance(f1.read(), f2.read())
 
-    for node in ast.iter_child_nodes(root):
-        if isinstance(node, ast.Import):
-            module = []
-        elif isinstance(node, ast.ImportFrom):
-            module = node.module.split('.')
-        else:
-            continue
 
-        for n in node.names:
-            yield Import(module, n.name.split('.'), n.asname)
+def lev_dist_norm(f1_path: str, f2_path: str):
+    with open(f1_path, 'r', encoding="UTF-8") as f1, open(f2_path, 'r', encoding="UTF-8") as f2:
+        str_1 = f1.read()
+        str_2 = f2.read()
+        return (distance(str_1, str_2) / (len(str_1) + len(str_2) + 1), len(str_1), len(str_2) + 1)
+
+
+def not_unicode(f1_path):
+    with open(f1_path, 'r', encoding="UTF-8") as f:
+        return len(re.sub('[\w\s.():",:;\[\]=+\-*`<>^/#{}\'\\\@!?%—~–&|$]', '', f.read()))
 
 
 if __name__ == '__main__':
-    for i in get_imports('plagiat1/awac.py'):
-        print(i)
+    parser = argparse.ArgumentParser(description='Train ML model to predict plagiarsm')
+    parser.add_argument('input', type=str, help='Folder with general scripts')
+    parser.add_argument('scores', type=str, help='Folder with first plagiats')
+    parser.add_argument(
+        '--model',
+        type=str,
+        default='model.pkl',
+        help='Path to download model'
+    )
+    args = parser.parse_args()
+
+    pickled_model = pickle.load(open(args.model, 'rb'))
+
+    scores = []
+
+    with open(args.input, 'r') as f:
+        for lst_el in f.read().splitlines():
+            f1_path, f2_path = lst_el.split(' ')
+            features = [lev_dist(f1_path, f2_path), lev_dist_norm(f1_path, f2_path), not_unicode(f1_path),
+                        not_unicode(f2_path)]
+            scores.append(str(pickled_model.predict_proba(features)))
+
+    with open(args.scores, 'w+') as f:
+        f.write('\n'.join(scores))
